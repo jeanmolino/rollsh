@@ -1,37 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UserAvatar } from '@/components/UserAvatar';
-
-const ICON_OPTIONS = [
-  'barbarian',
-  'barbute',
-  'brutal-helm',
-  'cowled',
-  'crowned-skull',
-  'cultist',
-  'diablo-skull',
-  'dragon-head',
-  'dwarf-face',
-  'dwarf-helmet',
-  'dwarf-king',
-  'elf-helmet',
-  'executioner-hood',
-  'female-vampire',
-  'goblin-head',
-  'golem-head',
-  'kenku-head',
-  'monk-face',
-  'nun-face',
-  'ogre',
-  'orc-head',
-  'overlord-helm',
-  'troll',
-  'vampire-dracula',
-  'visored-helm',
-  'warlock-hood',
-  'witch-face',
-  'wizard-face',
-  'woman-elf-face'
-];
+import { ICON_NAMES } from '@/components/icons';
 
 interface AvatarSelectorProps {
   open: boolean;
@@ -57,7 +26,7 @@ export function AvatarSelector({ open, onOpenChange, selectedEmoji, onSelect, us
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-6 gap-3 py-4">
-          {ICON_OPTIONS.map((icon) => (
+          {ICON_NAMES.map((icon) => (
             <button
               key={icon}
               onClick={() => handleSelect(icon)}

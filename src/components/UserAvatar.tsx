@@ -1,5 +1,6 @@
 import { cn } from '@/lib';
 import type { User } from '@/types';
+import { iconComponents } from '@/components/icons';
 
 interface UserAvatarProps {
   user: User;
@@ -16,8 +17,7 @@ export function UserAvatar({ user, size = 'medium', showName = false, className,
     large: 'w-16 h-16'
   };
 
-  const iconPath = `/src/assets/icons/${user.emoji}.svg`;
-
+  const IconComponent = iconComponents[user.emoji];
   const isPlain = variant === 'plain';
 
   return (
@@ -30,18 +30,20 @@ export function UserAvatar({ user, size = 'medium', showName = false, className,
         )}
         title={user.name}
       >
-        <img
-          src={iconPath}
-          alt={user.name}
-          className={cn(
-            'w-full h-full object-contain',
-            !isPlain && 'filter dark:invert',
-            isPlain && 'brightness-0 invert'
-          )}
-          onError={(e) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
+        {IconComponent ? (
+          <IconComponent
+            className={cn(
+              'w-full h-full object-contain',
+              !isPlain && 'fill-slate-800 dark:fill-white',
+              isPlain && 'fill-white'
+            )}
+            aria-label={user.name}
+          />
+        ) : (
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">
+            {user.name?.charAt(0)?.toUpperCase() ?? '?'}
+          </span>
+        )}
       </div>
       {showName && (
         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
