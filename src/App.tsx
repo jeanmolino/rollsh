@@ -1,31 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { NuqsAdapter } from 'nuqs/adapters/react';
+import { useQueryState } from 'nuqs';
 import { RoomProvider } from '@/contexts/RoomContext';
 import { HomePage } from '@/pages/HomePage';
 import { RoomPage } from '@/pages/RoomPage';
 
 type Page = 'home' | 'room';
 
-function App() {
+function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home');
-  const [initialSessionId, setInitialSessionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('room');
-
-    if (sessionId) {
-      setInitialSessionId(sessionId);
-    }
-  }, []);
+  const [sessionId, setSessionId] = useQueryState('session');
 
   const handleStart = () => {
     setCurrentPage('room');
-
-    if (!initialSessionId) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('room');
-      window.history.replaceState({}, '', url.toString());
-    }
   };
 
   return (
@@ -33,13 +20,22 @@ function App() {
       {currentPage === 'home' && (
         <HomePage
           onStart={handleStart}
-          initialSessionId={initialSessionId}
+          initialSessionId={sessionId}
+          setUrlSessionId={setSessionId}
         />
       )}
       {currentPage === 'room' && (
         <RoomPage />
       )}
     </RoomProvider>
+  );
+}
+
+function App() {
+  return (
+    <NuqsAdapter>
+      <AppContent />
+    </NuqsAdapter>
   );
 }
 

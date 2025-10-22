@@ -35,27 +35,22 @@ export const usePeerStore = create<PeerState>()(
       initialize: () => {
         const state = get();
 
-        console.log('[PeerStore] initialize called, peer exists:', !!state.peer);
-
         if (state.peer) {
           return Promise.resolve();
         }
 
         return new Promise<void>((resolve, reject) => {
-          console.log('[PeerStore] Creating new Peer instance...');
           const peerHost = import.meta.env.VITE_PEER_HOST || '0.peerjs.com';
           const peerPort = import.meta.env.VITE_PEER_PORT ? parseInt(import.meta.env.VITE_PEER_PORT) : 443;
           const peerPath = import.meta.env.VITE_PEER_PATH || '/';
           const peerSecure = import.meta.env.VITE_PEER_SECURE !== 'false';
-
-          console.log('[PeerStore] Peer config:', { host: peerHost, port: peerPort, path: peerPath, secure: peerSecure });
 
           const peer = new Peer({
             host: peerHost,
             port: peerPort,
             path: peerPath,
             secure: peerSecure,
-            debug: 3,
+            debug: 2,
             config: {
               iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -65,7 +60,6 @@ export const usePeerStore = create<PeerState>()(
           });
 
           peer.on('open', (id) => {
-            console.log('[PeerStore] Peer opened with ID:', id);
             set({
               peer,
               peerId: id,
@@ -75,17 +69,8 @@ export const usePeerStore = create<PeerState>()(
             resolve();
           });
 
-          peer.on('disconnected', () => {
-            console.warn('[PeerStore] Peer disconnected');
-          });
-
-          peer.on('close', () => {
-            console.warn('[PeerStore] Peer closed');
-          });
-
           peer.on('error', (error) => {
-            console.error('[PeerStore] Peer error:', error);
-            console.error('[PeerStore] Error type:', error.type);
+            console.error('Peer error:', error);
             set({ connectionError: error.message });
             peerEvents.emit('peer:error', error);
             reject(error);
@@ -158,15 +143,12 @@ export const usePeerStore = create<PeerState>()(
       },
 
       createSession: async (): Promise<string> => {
-        console.log('[PeerStore] createSession called');
         const id = get().peer?.id;
 
         if (!id) {
-          console.error('[PeerStore] Peer not initialized!');
           throw new Error('Peer not initialized');
         }
 
-        console.log('[PeerStore] Setting host mode, peerId:', id);
         set({
           isHost: true,
           isConnected: true,
@@ -174,7 +156,6 @@ export const usePeerStore = create<PeerState>()(
 
         peerEvents.emit('peer:connected', { peerId: id, isHost: true });
 
-        console.log('[PeerStore] createSession completed');
         return id;
       },
 
@@ -185,17 +166,24 @@ export const usePeerStore = create<PeerState>()(
           throw new Error('Peer not initialized');
         }
 
-        return new Promise((resolve, reject) => {
+        const joinPromise = new Promise<void>((resolve, reject) => {
           const conn = peer.connect(sessionId, {
             reliable: true,
           });
 
-          const timeout = setTimeout(() => {
-            reject(new Error('Connection timeout - could not connect to session'));
-          }, 30000);
+          const peerErrorHandler = (error: Error) => {
+            cleanup();
+            reject(error);
+          };
+
+          const cleanup = () => {
+            peer.off('error', peerErrorHandler);
+          };
+
+          peer.once('error', peerErrorHandler);
 
           conn.on('open', () => {
-            clearTimeout(timeout);
+            cleanup();
             const currentState = get();
             const newConnections = new Map(currentState.connections);
             newConnections.set(sessionId, conn);
@@ -246,13 +234,19 @@ export const usePeerStore = create<PeerState>()(
           });
 
           conn.on('error', (error) => {
-            clearTimeout(timeout);
+            cleanup();
             console.error('Connection error:', error);
             set({ connectionError: error.message });
             peerEvents.emit('peer:error', error);
             reject(error);
           });
         });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Connection timeout - could not connect to session')), 10000)
+        );
+
+        return Promise.race([joinPromise, timeoutPromise]);
       },
 
       sendMessage: (message: Omit<PeerMessage, 'userId' | 'timestamp'>, currentUser: User) => {

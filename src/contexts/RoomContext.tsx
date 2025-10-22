@@ -10,7 +10,7 @@ interface SessionContextType {
   isPeerReady: boolean;
   isConnected: boolean;
   connectionError: string | null;
-  setCurrentUser: (user: User) => void;
+  setCurrentUser: (user: User | null) => void;
   createSession: (user: User) => Promise<void>;
   joinSession: (user: User, sessionId: string) => Promise<void>;
   setTyping: (isTyping: boolean) => void;

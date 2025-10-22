@@ -29,16 +29,12 @@ export const useRoomStore = create<RoomState>()(
       },
 
       createSession: async (user: User) => {
-        console.log('[RoomStore] createSession started');
         const peerStore = usePeerStore.getState();
 
         if (!peerStore.peer) {
-          console.log('[RoomStore] Initializing peer...');
           await peerStore.initialize();
-          console.log('[RoomStore] Peer initialized');
         }
 
-        console.log('[RoomStore] Setting up event listeners...');
         const unsubscribes = [
           peerEvents.on('peer:message', (message: PeerMessage) => {
             handleMessage(message);
@@ -68,9 +64,7 @@ export const useRoomStore = create<RoomState>()(
 
         (window as any).__roomCleanup = cleanup;
 
-        console.log('[RoomStore] Creating session...');
         const sessionId = await peerStore.createSession();
-        console.log('[RoomStore] Session created:', sessionId);
 
         const newSession: Room = {
           id: sessionId,
@@ -82,12 +76,9 @@ export const useRoomStore = create<RoomState>()(
           currentUser: user,
           session: newSession,
         });
-
-        console.log('[RoomStore] createSession completed!');
       },
 
       joinSession: async (user: User, sessionId: string) => {
-        console.log('[RoomStore] joinSession started');
 
         const peerStore = usePeerStore.getState();
 

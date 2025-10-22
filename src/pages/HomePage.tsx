@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -23,16 +23,18 @@ const PREVIEW_LINES = [
 interface HomePageProps {
   onStart: () => void;
   initialSessionId?: string | null;
+  setUrlSessionId: (sessionId: string | null) => void;
 }
 
-export function HomePage({ onStart, initialSessionId }: HomePageProps) {
-  const { isPeerReady, setCurrentUser, createSession, joinSession, currentUser, connectionError } = useSession();
+export function HomePage({ onStart, initialSessionId, setUrlSessionId }: HomePageProps) {
+  const { isPeerReady, setCurrentUser, createSession, joinSession, currentUser, connectionError, session } = useSession();
   const [name, setName] = useState('');
   const [emoji, setEmoji] = useState('dragon-head');
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [showJoinInput, setShowJoinInput] = useState(!!initialSessionId);
   const [sessionId, setSessionId] = useState(initialSessionId || '');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const createUser = (): User => ({
     id: Math.random().toString(36).substring(7),
@@ -41,15 +43,23 @@ export function HomePage({ onStart, initialSessionId }: HomePageProps) {
   });
 
   const executeSessionAction = async (action: (user: User) => Promise<void>) => {
+    console.log('[HomePage] executeSessionAction START, isLoading:', isLoading);
     setIsLoading(true);
+    setError(null);
     try {
       const user = createUser();
       setCurrentUser(user);
+      console.log('[HomePage] Calling action...');
       await action(user);
+      console.log('[HomePage] Action succeeded');
       onStart();
     } catch (error) {
-      console.error('Failed to execute session action:', error);
+      console.error('[HomePage] Action failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to connect to session';
+      setError(errorMessage);
+      setCurrentUser(null);
     } finally {
+      console.log('[HomePage] executeSessionAction FINALLY, setting isLoading to false');
       setIsLoading(false);
     }
   };
@@ -58,6 +68,12 @@ export function HomePage({ onStart, initialSessionId }: HomePageProps) {
     if (!name.trim()) return;
     await executeSessionAction(createSession);
   };
+
+  useEffect(() => {
+    if (session?.id) {
+      setUrlSessionId(session.id);
+    }
+  }, [session?.id, setUrlSessionId]);
 
   const handleJoinSession = async () => {
     if (!name.trim() || !sessionId.trim()) return;
@@ -106,9 +122,9 @@ export function HomePage({ onStart, initialSessionId }: HomePageProps) {
           </Terminal.Content>
         </Terminal.Root>
         <div className="bg-white dark:bg-slate-950 rounded-lg shadow-lg border border-slate-200 dark:border-slate-800 p-8">
-          {connectionError && (
+          {(connectionError || error) && (
             <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded text-red-700 dark:text-red-400 text-sm">
-              Error: {connectionError}
+              Error: {error || connectionError}
             </div>
           )}
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Terminal } from "@/components/ui/terminal";
 import { useSession } from "@/contexts/RoomContext";
-import { Check, Copy } from "lucide-react";
+import { Check, Share2 } from "lucide-react";
 import { motion, type MotionProps } from "motion/react";
 import { cn } from "@/lib";
 
@@ -101,13 +101,15 @@ export const TerminalLayout = ({ children, className }: TerminalLayoutProps) => 
 
   if (!session || session.users.length === 0) return null;
 
-  const handleCopySessionId = async () => {
+  const handleShareLink = async () => {
+    const shareUrl = `${window.location.origin}?session=${session.id}`;
+
     try {
-      await navigator.clipboard.writeText(session.id);
+      await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Failed to copy:', error);
+      console.error('Failed to copy link:', error);
     }
   };
 
@@ -125,14 +127,14 @@ export const TerminalLayout = ({ children, className }: TerminalLayoutProps) => 
               {session.id}
             </div>
             <button
-              onClick={handleCopySessionId}
+              onClick={handleShareLink}
               className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-              title="Copy Session ID"
+              title="Share Session Link"
             >
               {copied ? (
                 <Check className="w-3 h-3 text-green-600" />
               ) : (
-                <Copy className="w-3 h-3 text-gray-600 dark:text-gray-400" />
+                <Share2 className="w-3 h-3 text-gray-600 dark:text-gray-400" />
               )}
             </button>
           </div>
