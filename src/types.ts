@@ -38,7 +38,9 @@ export type RoomMessageType =
   | 'user-join'
   | 'user-leave'
   | 'roll'
-  | 'typing';
+  | 'typing'
+  | 'sync-users'
+  | 'host-disconnected';
 
 export interface PeerMessage {
   type: RoomMessageType;
@@ -83,4 +85,20 @@ export interface UserLeaveMessage {
   data: {
     userId: string;
   };
+}
+
+export interface SyncUsersMessage {
+  type: 'sync-users';
+  userId: string;
+  timestamp: number;
+  data: {
+    users: User[];
+  };
+}
+
+export interface HostDisconnectedMessage {
+  type: 'host-disconnected';
+  userId: string;
+  timestamp: number;
+  data: Record<string, never>;
 }

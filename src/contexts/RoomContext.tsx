@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import type { User, Room, Message, PeerMessage } from '@/types';
-import { usePeerConnection } from '@/hooks/usePeerConnection';
+import { useRoomStore } from '@/stores/useRoomStore';
+import { usePeerStore } from '@/stores/usePeerStore';
 
 interface SessionContextType {
   currentUser: User | null;
@@ -21,142 +22,27 @@ interface SessionContextType {
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export function RoomProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Room | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const currentUser = useRoomStore((state) => state.currentUser);
+  const session = useRoomStore((state) => state.session);
+  const messages = useRoomStore((state) => state.messages);
+  const isPeerReady = usePeerStore((state) => state.isPeerReady);
+  const isConnected = usePeerStore((state) => state.isConnected);
+  const connectionError = usePeerStore((state) => state.connectionError);
 
-  const receiveMessages = (...message: Message[]) => {
-    setMessages(prev => [...prev, ...message])
-  }
+  const setCurrentUser = useRoomStore((state) => state.setCurrentUser);
+  const createSession = useRoomStore((state) => state.createSession);
+  const joinSession = useRoomStore((state) => state.joinSession);
+  const setTyping = useRoomStore((state) => state.setTyping);
+  const sendMessage = useRoomStore((state) => state.sendMessage);
+  const receiveMessages = useRoomStore((state) => state.receiveMessages);
+  const clearMessages = useRoomStore((state) => state.clearMessages);
 
-  const clearMessages = () => {
-    setMessages([])
-  }
-
-  const handleUserJoin = useCallback((user: User) => {
-    setSession((prev) => {
-      if (!prev) return prev;
-      if (prev.users.some(u => u.id === user.id)) return prev;
-
-      return {
-        ...prev,
-        users: [...prev.users, user],
-      };
-    });
-  }, []);
-
-  const handleUserLeave = useCallback((userId: string) => {
-    setSession((prev) => {
-      if (!prev) return prev;
-
-      return {
-        ...prev,
-        users: prev.users.filter(u => u.id !== userId),
-        isTyping: {
-          ...prev.isTyping,
-          [userId]: false,
-        },
-      };
-    });
-  }, []);
-
-  const handleMessage = useCallback((message: PeerMessage) => {
-    const handlers: Record<string, () => void> = {
-      roll: () => {
-        const data = message.data as { command: string; result?: string; error?: string };
-
-          receiveMessages({ type: 'command', content: data.command, userId: message.userId });
-
-          if (data.error) {
-            receiveMessages({ type: 'error', content: data.error, userId: message.userId });
-          } else if (data.result) {
-            receiveMessages({ type: 'result', content: data.result, userId: message.userId });
-          }
-
-          receiveMessages({ type: 'text', content: '' });
-      },
-      typing: () => {
-        const data = message.data as { isTyping: boolean };
-        setSession((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            isTyping: {
-              ...prev.isTyping,
-              [message.userId]: data.isTyping,
-            },
-          };
-        });
-      },
+  useEffect(() => {
+    return () => {
+      const peerStore = usePeerStore.getState();
+      peerStore.destroy();
     };
-
-    handlers[message.type]?.();
   }, []);
-
-  const {
-    isPeerReady,
-    isConnected,
-    createSession: createPeerSession,
-    joinSession: joinPeerSession,
-    sendMessage: sendMessage,
-    connectionError,
-  } = usePeerConnection({
-    currentUser,
-    onMessage: handleMessage,
-    onUserJoin: handleUserJoin,
-    onUserLeave: handleUserLeave,
-  });
-
-  const createSession = useCallback(async (user: User) => {
-    const sessionId = await createPeerSession();
-
-    const newSession: Room = {
-      id: sessionId,
-      users: [user],
-      isTyping: {},
-    };
-
-    setSession(newSession);
-  }, [createPeerSession]);
-
-  const joinSession = useCallback(
-    async (user: User, sessionId: string) => {
-      await joinPeerSession(user, sessionId);
-
-      const newSession = {
-        id: sessionId,
-        users: [user],
-        isTyping: {},
-      };
-
-      setSession(newSession);
-    },
-    [joinPeerSession]
-  );
-
-  const setTyping = useCallback(
-    (isTyping: boolean) => {
-      if (!currentUser) return;
-
-      sendMessage({
-        type: 'typing',
-        data: { isTyping },
-      });
-
-      setSession((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          isTyping: {
-            ...prev.isTyping,
-            [currentUser.id]: isTyping,
-          },
-        };
-      });
-    },
-    [currentUser, sendMessage]
-  );
-
 
   return (
     <SessionContext.Provider
@@ -173,7 +59,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
         setTyping,
         sendMessage,
         receiveMessages,
-        clearMessages
+        clearMessages,
       }}
     >
       {children}

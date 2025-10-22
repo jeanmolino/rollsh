@@ -74,7 +74,7 @@ export function HomePage({ onStart, initialSessionId }: HomePageProps) {
     }
   };
 
-  if (!isPeerReady && currentUser) {
+  if (!isPeerReady && currentUser && !isLoading) {
     return <LoadingScreen />;
   }
 
