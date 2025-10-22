@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { User, Room, Message, PeerMessage } from '@/types';
 import { usePeerStore } from './usePeerStore';
+import { peerEvents } from '@/lib/peerEvents';
 
 interface RoomState {
   currentUser: User | null;
@@ -14,9 +15,6 @@ interface RoomState {
   sendMessage: (message: Omit<PeerMessage, 'userId' | 'timestamp'>) => void;
   receiveMessages: (...messages: Message[]) => void;
   clearMessages: () => void;
-  handleUserJoin: (user: User) => void;
-  handleUserLeave: (userId: string) => void;
-  handleMessage: (message: PeerMessage) => void;
 }
 
 export const useRoomStore = create<RoomState>()(
@@ -31,18 +29,48 @@ export const useRoomStore = create<RoomState>()(
       },
 
       createSession: async (user: User) => {
+        console.log('[RoomStore] createSession started');
         const peerStore = usePeerStore.getState();
 
         if (!peerStore.peer) {
-          await peerStore.initialize({
-            onMessage: get().handleMessage,
-            onUserJoin: get().handleUserJoin,
-            onUserLeave: get().handleUserLeave,
-            getCurrentUsers: () => get().session?.users || [],
-          });
+          console.log('[RoomStore] Initializing peer...');
+          await peerStore.initialize();
+          console.log('[RoomStore] Peer initialized');
         }
 
+        console.log('[RoomStore] Setting up event listeners...');
+        const unsubscribes = [
+          peerEvents.on('peer:message', (message: PeerMessage) => {
+            handleMessage(message);
+          }),
+          peerEvents.on('peer:user-join', (joinedUser: User) => {
+            handleUserJoin(joinedUser);
+          }),
+          peerEvents.on('peer:user-leave', (userId: string) => {
+            handleUserLeave(userId);
+          }),
+          peerEvents.on('peer:request-sync', (connection) => {
+            const currentState = get();
+            if (currentState.session) {
+              connection.send({
+                type: 'sync-users',
+                userId: 'host',
+                timestamp: Date.now(),
+                data: { users: currentState.session.users },
+              });
+            }
+          }),
+        ];
+
+        const cleanup = () => {
+          unsubscribes.forEach(unsub => unsub());
+        };
+
+        (window as any).__roomCleanup = cleanup;
+
+        console.log('[RoomStore] Creating session...');
         const sessionId = await peerStore.createSession();
+        console.log('[RoomStore] Session created:', sessionId);
 
         const newSession: Room = {
           id: sessionId,
@@ -54,19 +82,36 @@ export const useRoomStore = create<RoomState>()(
           currentUser: user,
           session: newSession,
         });
+
+        console.log('[RoomStore] createSession completed!');
       },
 
       joinSession: async (user: User, sessionId: string) => {
+        console.log('[RoomStore] joinSession started');
+
         const peerStore = usePeerStore.getState();
 
         if (!peerStore.peer) {
-          await peerStore.initialize({
-            onMessage: get().handleMessage,
-            onUserJoin: get().handleUserJoin,
-            onUserLeave: get().handleUserLeave,
-            getCurrentUsers: () => get().session?.users || [],
-          });
+          await peerStore.initialize();
         }
+
+        const unsubscribes = [
+          peerEvents.on('peer:message', (message: PeerMessage) => {
+            handleMessage(message);
+          }),
+          peerEvents.on('peer:user-join', (joinedUser: User) => {
+            handleUserJoin(joinedUser);
+          }),
+          peerEvents.on('peer:user-leave', (userId: string) => {
+            handleUserLeave(userId);
+          }),
+        ];
+
+        const cleanup = () => {
+          unsubscribes.forEach(unsub => unsub());
+        };
+
+        (window as any).__roomCleanup = cleanup;
 
         await peerStore.joinSession(user, sessionId);
 
@@ -127,109 +172,109 @@ export const useRoomStore = create<RoomState>()(
       clearMessages: () => {
         set({ messages: [] });
       },
-
-      handleUserJoin: (user: User) => {
-        set((state) => {
-          if (!state.session) return state;
-
-          if (state.session.users.some((u) => u.id === user.id)) {
-            return state;
-          }
-
-          return {
-            session: {
-              ...state.session,
-              users: [...state.session.users, user],
-            },
-          };
-        });
-      },
-
-      handleUserLeave: (userId: string) => {
-        set((state) => {
-          if (!state.session) return state;
-
-          return {
-            session: {
-              ...state.session,
-              users: state.session.users.filter((u) => u.id !== userId),
-              isTyping: {
-                ...state.session.isTyping,
-                [userId]: false,
-              },
-            },
-          };
-        });
-      },
-
-      handleMessage: (message: PeerMessage) => {
-        const handlers: Record<string, () => void> = {
-          roll: () => {
-            const data = message.data as { command: string; result?: string; error?: string };
-
-            get().receiveMessages({ type: 'command', content: data.command, userId: message.userId });
-
-            if (data.error) {
-              get().receiveMessages({ type: 'error', content: data.error, userId: message.userId });
-            } else if (data.result) {
-              get().receiveMessages({ type: 'result', content: data.result, userId: message.userId });
-            }
-
-            get().receiveMessages({ type: 'text', content: '' });
-          },
-          typing: () => {
-            const data = message.data as { isTyping: boolean };
-            set((state) => {
-              if (!state.session) return state;
-
-              return {
-                session: {
-                  ...state.session,
-                  isTyping: {
-                    ...state.session.isTyping,
-                    [message.userId]: data.isTyping,
-                  },
-                },
-              };
-            });
-          },
-          'sync-users': () => {
-            const data = message.data as { users: User[] };
-            set((state) => {
-              if (!state.session) return state;
-
-              const currentUser = state.currentUser;
-              const allUsers = currentUser
-                ? [...data.users.filter(u => u.id !== currentUser.id), currentUser]
-                : data.users;
-
-              return {
-                session: {
-                  ...state.session,
-                  users: allUsers,
-                },
-              };
-            });
-          },
-          'host-disconnected': () => {
-            const peerStore = usePeerStore.getState();
-            peerStore.disconnect(get().currentUser);
-
-            set({
-              session: null,
-              messages: [],
-            });
-
-            get().receiveMessages({
-              type: 'error',
-              content: 'Host disconnected. Session ended.',
-            });
-          },
-        };
-
-        handlers[message.type]?.();
-      },
     }),
     { name: 'RoomStore' }
   )
 );
+
+function handleUserJoin(user: User) {
+  const state = useRoomStore.getState();
+
+  if (!state.session) return;
+
+  if (state.session.users.some((u) => u.id === user.id)) {
+    return;
+  }
+
+  useRoomStore.setState({
+    session: {
+      ...state.session,
+      users: [...state.session.users, user],
+    },
+  });
+}
+
+function handleUserLeave(userId: string) {
+  const state = useRoomStore.getState();
+
+  if (!state.session) return;
+
+  useRoomStore.setState({
+    session: {
+      ...state.session,
+      users: state.session.users.filter((u) => u.id !== userId),
+      isTyping: {
+        ...state.session.isTyping,
+        [userId]: false,
+      },
+    },
+  });
+}
+
+function handleMessage(message: PeerMessage) {
+  const state = useRoomStore.getState();
+
+  const handlers: Record<string, () => void> = {
+    roll: () => {
+      const data = message.data as { command: string; result?: string; error?: string };
+
+      state.receiveMessages({ type: 'command', content: data.command, userId: message.userId });
+
+      if (data.error) {
+        state.receiveMessages({ type: 'error', content: data.error, userId: message.userId });
+      } else if (data.result) {
+        state.receiveMessages({ type: 'result', content: data.result, userId: message.userId });
+      }
+
+      state.receiveMessages({ type: 'text', content: '' });
+    },
+    typing: () => {
+      const data = message.data as { isTyping: boolean };
+
+      if (!state.session) return;
+
+      useRoomStore.setState({
+        session: {
+          ...state.session,
+          isTyping: {
+            ...state.session.isTyping,
+            [message.userId]: data.isTyping,
+          },
+        },
+      });
+    },
+    'sync-users': () => {
+      const data = message.data as { users: User[] };
+
+      if (!state.session) return;
+
+      const currentUser = state.currentUser;
+      const allUsers = currentUser
+        ? [...data.users.filter(u => u.id !== currentUser.id), currentUser]
+        : data.users;
+
+      useRoomStore.setState({
+        session: {
+          ...state.session,
+          users: allUsers,
+        },
+      });
+    },
+    'host-disconnected': () => {
+      const peerStore = usePeerStore.getState();
+      peerStore.disconnect(state.currentUser);
+
+      useRoomStore.setState({
+        session: null,
+        messages: [],
+      });
+
+      state.receiveMessages({
+        type: 'error',
+        content: 'Host disconnected. Session ended.',
+      });
+    },
+  };
+
+  handlers[message.type]?.();
+}

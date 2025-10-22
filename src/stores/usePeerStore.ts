@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware';
 import Peer from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import type { PeerMessage, User } from '@/types';
+import { peerEvents } from '@/lib/peerEvents';
 
 interface PeerState {
   peerId: string | null;
@@ -12,16 +13,7 @@ interface PeerState {
   connectionError: string | null;
   peer: Peer | null;
   connections: Map<string, DataConnection>;
-  onMessage: ((message: PeerMessage) => void) | null;
-  onUserJoin: ((user: User) => void) | null;
-  onUserLeave: ((userId: string) => void) | null;
-  getCurrentUsers: (() => User[]) | null;
-  initialize: (callbacks: {
-    onMessage: (message: PeerMessage) => void;
-    onUserJoin: (user: User) => void;
-    onUserLeave: (userId: string) => void;
-    getCurrentUsers: () => User[];
-  }) => Promise<void>;
+  initialize: () => Promise<void>;
   createSession: () => Promise<string>;
   joinSession: (user: User, sessionId: string) => Promise<void>;
   sendMessage: (message: Omit<PeerMessage, 'userId' | 'timestamp'>, currentUser: User) => void;
@@ -39,31 +31,31 @@ export const usePeerStore = create<PeerState>()(
       connectionError: null,
       peer: null,
       connections: new Map(),
-      onMessage: null,
-      onUserJoin: null,
-      onUserLeave: null,
-      getCurrentUsers: null,
 
-      initialize: (callbacks) => {
+      initialize: () => {
         const state = get();
 
+        console.log('[PeerStore] initialize called, peer exists:', !!state.peer);
+
         if (state.peer) {
-          set({ ...callbacks });
           return Promise.resolve();
         }
 
         return new Promise<void>((resolve, reject) => {
+          console.log('[PeerStore] Creating new Peer instance...');
           const peerHost = import.meta.env.VITE_PEER_HOST || '0.peerjs.com';
           const peerPort = import.meta.env.VITE_PEER_PORT ? parseInt(import.meta.env.VITE_PEER_PORT) : 443;
           const peerPath = import.meta.env.VITE_PEER_PATH || '/';
           const peerSecure = import.meta.env.VITE_PEER_SECURE !== 'false';
+
+          console.log('[PeerStore] Peer config:', { host: peerHost, port: peerPort, path: peerPath, secure: peerSecure });
 
           const peer = new Peer({
             host: peerHost,
             port: peerPort,
             path: peerPath,
             secure: peerSecure,
-            debug: 2,
+            debug: 3,
             config: {
               iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -73,7 +65,9 @@ export const usePeerStore = create<PeerState>()(
           });
 
           peer.on('open', (id) => {
+            console.log('[PeerStore] Peer opened with ID:', id);
             set({
+              peer,
               peerId: id,
               isPeerReady: true,
               connectionError: null,
@@ -81,9 +75,19 @@ export const usePeerStore = create<PeerState>()(
             resolve();
           });
 
+          peer.on('disconnected', () => {
+            console.warn('[PeerStore] Peer disconnected');
+          });
+
+          peer.on('close', () => {
+            console.warn('[PeerStore] Peer closed');
+          });
+
           peer.on('error', (error) => {
-            console.error('Peer error:', error);
+            console.error('[PeerStore] Peer error:', error);
+            console.error('[PeerStore] Error type:', error.type);
             set({ connectionError: error.message });
+            peerEvents.emit('peer:error', error);
             reject(error);
           });
 
@@ -99,14 +103,8 @@ export const usePeerStore = create<PeerState>()(
                   isConnected: true,
                 });
 
-                if (currentState.isHost && currentState.getCurrentUsers) {
-                  const users = currentState.getCurrentUsers();
-                  connection.send({
-                    type: 'sync-users',
-                    userId: 'host',
-                    timestamp: Date.now(),
-                    data: { users },
-                  } as PeerMessage);
+                if (currentState.isHost) {
+                  peerEvents.emit('peer:request-sync', connection);
                 }
               });
 
@@ -114,15 +112,15 @@ export const usePeerStore = create<PeerState>()(
                 const message = data as PeerMessage;
                 const currentState = get();
 
+                peerEvents.emit('peer:message', message);
+
                 if (message.type === 'user-join') {
                   const msgData = message.data as { user: User };
-                  currentState.onUserJoin?.(msgData.user);
+                  peerEvents.emit('peer:user-join', msgData.user);
                 } else if (message.type === 'user-leave') {
                   const msgData = message.data as { userId: string };
-                  currentState.onUserLeave?.(msgData.userId);
+                  peerEvents.emit('peer:user-leave', msgData.userId);
                 }
-
-                currentState.onMessage?.(message);
 
                 if (currentState.isHost) {
                   currentState.connections.forEach((conn, peerId) => {
@@ -142,35 +140,41 @@ export const usePeerStore = create<PeerState>()(
                   connections: newConnections,
                   isConnected: newConnections.size > 0,
                 });
+
+                if (newConnections.size === 0) {
+                  peerEvents.emit('peer:disconnected', undefined);
+                }
               });
 
               connection.on('error', (error) => {
                 console.error('Connection error:', error);
+                peerEvents.emit('peer:error', error);
               });
             };
 
             handleIncomingConnection(conn);
           });
-
-          set({
-            peer,
-            ...callbacks,
-          });
         });
       },
 
       createSession: async (): Promise<string> => {
+        console.log('[PeerStore] createSession called');
         const id = get().peer?.id;
 
         if (!id) {
+          console.error('[PeerStore] Peer not initialized!');
           throw new Error('Peer not initialized');
         }
 
+        console.log('[PeerStore] Setting host mode, peerId:', id);
         set({
           isHost: true,
           isConnected: true,
         });
 
+        peerEvents.emit('peer:connected', { peerId: id, isHost: true });
+
+        console.log('[PeerStore] createSession completed');
         return id;
       },
 
@@ -202,6 +206,8 @@ export const usePeerStore = create<PeerState>()(
               isHost: false,
             });
 
+            peerEvents.emit('peer:connected', { peerId: sessionId, isHost: false });
+
             conn.send({
               type: 'user-join',
               userId: user.id,
@@ -214,17 +220,16 @@ export const usePeerStore = create<PeerState>()(
 
           conn.on('data', (data) => {
             const message = data as PeerMessage;
-            const currentState = get();
+
+            peerEvents.emit('peer:message', message);
 
             if (message.type === 'user-join') {
               const msgData = message.data as { user: User };
-              currentState.onUserJoin?.(msgData.user);
+              peerEvents.emit('peer:user-join', msgData.user);
             } else if (message.type === 'user-leave') {
               const msgData = message.data as { userId: string };
-              currentState.onUserLeave?.(msgData.userId);
+              peerEvents.emit('peer:user-leave', msgData.userId);
             }
-
-            currentState.onMessage?.(message);
           });
 
           conn.on('close', () => {
@@ -236,12 +241,15 @@ export const usePeerStore = create<PeerState>()(
               connections: newConnections,
               isConnected: false,
             });
+
+            peerEvents.emit('peer:disconnected', undefined);
           });
 
           conn.on('error', (error) => {
             clearTimeout(timeout);
             console.error('Connection error:', error);
             set({ connectionError: error.message });
+            peerEvents.emit('peer:error', error);
             reject(error);
           });
         });
@@ -304,6 +312,8 @@ export const usePeerStore = create<PeerState>()(
           connections: new Map(),
           isConnected: false,
         });
+
+        peerEvents.emit('peer:disconnected', undefined);
       },
 
       destroy: () => {
@@ -323,11 +333,9 @@ export const usePeerStore = create<PeerState>()(
           connectionError: null,
           peer: null,
           connections: new Map(),
-          onMessage: null,
-          onUserJoin: null,
-          onUserLeave: null,
-          getCurrentUsers: null,
         });
+
+        peerEvents.removeAllListeners();
       },
     }),
     { name: 'PeerStore' }
